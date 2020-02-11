@@ -55,7 +55,7 @@ data class PackageReference(
      * The list of references to packages this package depends on. Note that this list depends on the scope in
      * which this package reference is used.
      */
-    val dependencies: SortedSet<PackageReference> = sortedSetOf(),
+        val dependencies: SortedSet<PackageReference> = sortedSetOf(),
 
     /**
      * A list of [OrtIssue]s that occurred handling this [PackageReference].

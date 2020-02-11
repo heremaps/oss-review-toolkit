@@ -197,6 +197,7 @@ Currently, the following package managers are supported:
 * [Composer](https://getcomposer.org/) (PHP)
 * [PIP](https://pip.pypa.io/) (Python)
 * [Pipenv](https://pipenv.readthedocs.io/) (Python)
+* [PNPM](https://pnpm.js.org) (Node.js)
 * [Pub](https://pub.dev/) (Dart / Flutter)
 * [SBT](http://www.scala-sbt.org/) (Scala)
 * [Stack](http://haskellstack.org/) (Haskell)
