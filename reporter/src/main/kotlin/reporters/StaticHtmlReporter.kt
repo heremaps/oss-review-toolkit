@@ -32,14 +32,14 @@ import org.ossreviewtoolkit.reporter.ReporterInput
 import org.ossreviewtoolkit.reporter.reporters.ReportTableModel.IssueTable
 import org.ossreviewtoolkit.reporter.reporters.ReportTableModel.ProjectTable
 import org.ossreviewtoolkit.reporter.reporters.ReportTableModel.ResolvableIssue
-import org.ossreviewtoolkit.utils.ORT_FULL_NAME
 import org.ossreviewtoolkit.utils.isValidUrl
 import org.ossreviewtoolkit.utils.normalizeLineBreaks
 import com.vladsch.flexmark.html.HtmlRenderer
 import com.vladsch.flexmark.parser.Parser
 
 import java.io.OutputStream
-import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
 
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -98,40 +98,46 @@ class StaticHtmlReporter : Reporter {
                 div {
                     id = "report-container"
 
-                    div("ort-report-label") {
-                        +"Scan Report"
+                    val titleExtension = if (reportTableModel.metadata.isNotEmpty()) {
+                        arrayOf(
+                            reportTableModel.metadata["SW_NAME"],
+                            reportTableModel.metadata["SW_VERSION"]
+                        ).joinToString(separator = " ")
+                    } else {
+                        ""
                     }
 
-                    div {
-                        +"Created by "
-                        strong { +"ORT" }
-                        +", the "
-                        a {
-                            href = "http://oss-review-toolkit.org/"
-                            +ORT_FULL_NAME
+                    div("ort-report-label") {
+                        +"Scan Report"
+                        +(if (titleExtension.isNotEmpty()) " for " else "")
+                        i {
+                            +titleExtension
                         }
-                        +", version ${Environment().ortVersion} on ${Instant.now()}."
                     }
+
+                    highlights(reportTableModel)
+
+                    index(reportTableModel)
+
+                    // Technical Issues
+                    if (reportTableModel.issueSummary.rows.isNotEmpty()) {
+                        issueTable(reportTableModel.issueSummary)
+                    }
+
+                    // Policy Violations
+                    reportTableModel.evaluatorIssues?.let {
+                        evaluatorTable(it)
+                    }
+
+                    projectsAndDependencies(reportTableModel)
 
                     if (reportTableModel.metadata.isNotEmpty()) {
                         metadataTable(reportTableModel.metadata)
                     }
 
-                    index(reportTableModel)
-
-                    reportTableModel.evaluatorIssues?.let {
-                        evaluatorTable(it)
-                    }
-
-                    if (reportTableModel.issueSummary.rows.isNotEmpty()) {
-                        issueTable(reportTableModel.issueSummary)
-                    }
-
-                    reportTableModel.projectDependencies.forEach { (project, table) ->
-                        projectTable(project, table)
-                    }
-
                     repositoryConfiguration(reportTableModel.config)
+
+                    createdBy()
                 }
             }
         }
@@ -140,7 +146,10 @@ class StaticHtmlReporter : Reporter {
     }
 
     private fun DIV.metadataTable(metadata: Map<String, String>) {
-        h2 { +"Metadata" }
+        h2 {
+            id = "scan-metadata"
+            +"Metadata"
+        }
         table("ort-report-metadata") {
             tbody { metadata.forEach { (key, value) -> metadataRow(key, value) } }
         }
@@ -153,10 +162,47 @@ class StaticHtmlReporter : Reporter {
         }
     }
 
-    private fun DIV.index(reportTableModel: ReportTableModel) {
-        h2 { +"Index" }
+    private fun DIV.highlights(reportTableModel: ReportTableModel) {
+        h2 {
+            +"Highlights"
+        }
 
+        val issueErrorCount = reportTableModel.issueSummary.errorCount
+        val issueWarningCount = reportTableModel.issueSummary.warningCount
+
+        reportTableModel.evaluatorIssues?.let { ruleViolations ->
+            val issues = ruleViolations.filterNot { it.isResolved }.groupBy { it.violation.severity }
+            val evaluatorErrorCount = issues[Severity.ERROR].orEmpty().size
+            val evaluatorWarningCount = issues[Severity.WARNING].orEmpty().size
+
+            val errors = issueErrorCount + evaluatorErrorCount
+            val warnings = issueWarningCount + evaluatorWarningCount
+
+            val resultStr =
+                when {
+                    (errors == 0 && warnings == 0) ->
+                        "All OK: 0 errors, 0 warnings"
+                    else ->
+                        "$errors error${if (errors == 1) "" else "s"} to fix, " +
+                                "$warnings warning${if (warnings == 1) "" else "s"}"
+                }
+
+            unsafe { +"<summary>$resultStr</summary>" }
+        }
+
+        p { +"" }
         ul {
+            if (reportTableModel.issueSummary.rows.isNotEmpty()) {
+                li {
+                    a("#issue-summary") {
+                        with(reportTableModel.issueSummary) {
+                            +"Technical Issues (errors: $errorCount, warnings: $warningCount, "
+                            +"hints: $hintCount)"
+                        }
+                    }
+                }
+            }
+
             reportTableModel.evaluatorIssues?.let { ruleViolations ->
                 val issues = ruleViolations.filterNot { it.isResolved }.groupBy { it.violation.severity }
                 val errorCount = issues[Severity.ERROR].orEmpty().size
@@ -165,33 +211,41 @@ class StaticHtmlReporter : Reporter {
 
                 li {
                     a("#rule-violation-summary") {
-                        +("Rule Violation Summary ($errorCount errors, $warningCount warnings, $hintCount hints to " +
-                                "resolve)")
+                        +("Policy Violations (errors: $errorCount, warnings: $warningCount, " +
+                                "hints: $hintCount)")
                     }
                 }
             }
+        }
+    }
+    private fun DIV.index(reportTableModel: ReportTableModel) {
+        h2 { +"Index" }
 
+        ul {
             if (reportTableModel.issueSummary.rows.isNotEmpty()) {
                 li {
                     a("#issue-summary") {
-                        with(reportTableModel.issueSummary) {
-                            +"Issue Summary ($errorCount errors, $warningCount warnings, $hintCount hints to resolve)"
-                        }
+                        +"Technical Issues"
                     }
                 }
             }
 
-            reportTableModel.projectDependencies.forEach { (project, projectTable) ->
-                li {
-                    a("#${project.id.toCoordinates()}") {
-                        +project.id.toCoordinates()
+            li {
+                a("#rule-violation-summary") {
+                    +"Policy Violations"
+                }
+            }
 
-                        if (projectTable.isExcluded()) {
-                            projectTable.pathExcludes.forEach { exclude ->
-                                +" "
-                                div("ort-reason") { +"Excluded: ${exclude.reason} - ${exclude.comment}" }
-                            }
-                        }
+            li {
+                    a(href = "#project-dependencies") {
+                        +"Projects and Dependencies"
+                }
+            }
+
+            if (reportTableModel.metadata.isNotEmpty()) {
+                li {
+                    a("#scan-metadata") {
+                        +"Metadata"
                     }
                 }
             }
@@ -212,11 +266,11 @@ class StaticHtmlReporter : Reporter {
 
         h2 {
             id = "rule-violation-summary"
-            +"Rule Violation Summary ($errorCount errors, $warningCount warnings, $hintCount hints to resolve)"
+            +"Policy Violations (errors: $errorCount, warnings: $warningCount, hints: $hintCount)"
         }
 
         if (ruleViolations.isEmpty()) {
-            +"No rule violations found."
+            +"No Policy Violations found."
         } else {
             table("ort-report-table ort-violations") {
                 thead {
@@ -286,7 +340,7 @@ class StaticHtmlReporter : Reporter {
         h2 {
             id = "issue-summary"
             with(issueSummary) {
-                +"Issue Summary ($errorCount errors, $warningCount warnings, $hintCount hints to resolve)"
+                +"Technical Issues (errors: $errorCount, warnings: $warningCount, hints: $hintCount)"
             }
         }
 
@@ -373,16 +427,51 @@ class StaticHtmlReporter : Reporter {
         }
     }
 
+    private fun DIV.projectsAndDependencies(reportTableModel: ReportTableModel) {
+        h2 {
+            id = "project-dependencies"
+            +"Projects and Dependencies"
+        }
+
+        details {
+            unsafe {
+                +"<summary>Project and Dependency Index</summary>"
+            }
+            ul {
+                reportTableModel.projectDependencies.forEach { (project, projectTable) ->
+                    li {
+                        a("#${project.id.toCoordinates()}") {
+                            +project.id.toCoordinates()
+
+                            if (projectTable.isExcluded()) {
+                                projectTable.pathExcludes.forEach { exclude ->
+                                    +" "
+                                    div("ort-reason") {
+                                        +"Excluded: ${exclude.reason} - ${exclude.comment}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        reportTableModel.projectDependencies.forEach { (project, table) ->
+            projectTable(project, table)
+        }
+    }
+
     private fun DIV.projectTable(project: Project, table: ProjectTable) {
         val excludedClass = "ort-excluded".takeIf { table.isExcluded() }.orEmpty()
 
-        h2 {
+        h3 {
             id = project.id.toCoordinates()
             +"${project.id.toCoordinates()} (${table.fullDefinitionFilePath})"
         }
 
         if (table.isExcluded()) {
-            h3 { +"Project is Excluded" }
+            h4 { +"Project is Excluded" }
             p { +"The project is excluded for the following reason(s):" }
         }
 
@@ -393,31 +482,33 @@ class StaticHtmlReporter : Reporter {
         }
 
         project.vcsProcessed.let { vcsInfo ->
-            h3(excludedClass) { +"VCS Information" }
+            details {
+                unsafe { +"<summary><strong id=\"$excludedClass\">VCS Information</strong></summary>" }
 
-            table("ort-report-metadata $excludedClass") {
-                tbody {
-                    tr {
-                        td { +"Type" }
-                        td { +vcsInfo.type.toString() }
-                    }
-                    tr {
-                        td { +"URL" }
-                        td { +vcsInfo.url }
-                    }
-                    tr {
-                        td { +"Path" }
-                        td { +vcsInfo.path }
-                    }
-                    tr {
-                        td { +"Revision" }
-                        td { +vcsInfo.revision }
+                table("ort-report-metadata $excludedClass") {
+                    tbody {
+                        tr {
+                            td { +"Type" }
+                            td { +vcsInfo.type.toString() }
+                        }
+                        tr {
+                            td { +"URL" }
+                            td { +vcsInfo.url }
+                        }
+                        tr {
+                            td { +"Path" }
+                            td { +vcsInfo.path }
+                        }
+                        tr {
+                            td { +"Revision" }
+                            td { +vcsInfo.revision }
+                        }
                     }
                 }
             }
         }
 
-        h3(excludedClass) { +"Packages" }
+        h4(excludedClass) { +"Packages" }
 
         table("ort-report-table ort-packages $excludedClass") {
             thead {
@@ -467,7 +558,7 @@ class StaticHtmlReporter : Reporter {
             td {
                 if (row.scopes.isNotEmpty()) {
                     ul {
-                        row.scopes.entries.sortedWith(compareBy({ it.value.isNotEmpty() }, { it.key })).forEach {
+                        row.scopes.entries.sortedWith(compareBy({ it.value.isNotEmpty() }, { it.key })).forEach { it ->
                             val excludedClass = if (it.value.isNotEmpty()) "ort-excluded" else ""
                             li(excludedClass) {
                                 +it.key
@@ -548,22 +639,12 @@ class StaticHtmlReporter : Reporter {
                                     div {
                                         +finding.license
                                         if (permalink != null) {
-                                            val count = finding.locations.size
-                                            if (count > 1) {
-                                                +" (exemplary "
-                                                a {
-                                                    href = permalink
-                                                    +"link"
-                                                }
-                                                +" to the first of $count locations)"
-                                            } else {
-                                                +" ("
-                                                a {
-                                                    href = permalink
-                                                    +"link"
-                                                }
-                                                +" to the location)"
+                                            +" ("
+                                            a {
+                                                href = permalink
+                                                +"link to finding 1/${finding.locations.size}"
                                             }
+                                            +")"
                                         }
                                     }
                                 } else {
@@ -621,6 +702,20 @@ class StaticHtmlReporter : Reporter {
                 +"\n"
                 +yamlMapper.writerWithDefaultPrettyPrinter().writeValueAsString(config)
             }
+        }
+    }
+
+    private fun DIV.createdBy() {
+        div {
+            +"Created by "
+            strong {
+                a {
+                    href = "http://oss-review-toolkit.org/"
+                    +"ORT"
+                }
+            }
+            +" version ${Environment().ortVersion} at ${SimpleDateFormat("HH:mm:ss MMM dd, yyyy").
+            format(Date())}"
         }
     }
 
