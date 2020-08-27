@@ -216,8 +216,16 @@ object Downloader {
         }
 
         val startTime = Instant.now()
-        val workingTree = try {
-            applicableVcs.download(pkg, outputDirectory, allowMovingRevisions)
+
+        val downloadedVcs = try {
+            val workingTree = applicableVcs.download(pkg, outputDirectory, allowMovingRevisions)
+            val workingTreeInfo = workingTree.getInfo()
+
+            pkg.vcsProcessed.copy(
+                type = applicableVcs.type,
+                revision = workingTree.initialRevision ?: workingTreeInfo.revision,
+                resolvedRevision = workingTreeInfo.revision
+            )
         } catch (e: DownloadException) {
             // TODO: We should introduce something like a "strict" mode and only do these kind of fallbacks in
             //       non-strict mode.
@@ -233,24 +241,29 @@ object Downloader {
                 outputDirectory.safeMkdirs()
 
                 val fallbackPkg = pkg.copy(vcsProcessed = pkg.vcsProcessed.copy(url = vcsUrlNoCredentials))
-                applicableVcs.download(fallbackPkg, outputDirectory, allowMovingRevisions)
+                val workingTree = applicableVcs.download(fallbackPkg, outputDirectory, allowMovingRevisions)
+                val workingTreeInfo = workingTree.getInfo()
+
+                fallbackPkg.vcsProcessed.copy(
+                    type = applicableVcs.type,
+                    revision = workingTree.initialRevision ?: workingTreeInfo.revision,
+                    resolvedRevision = workingTreeInfo.revision
+                )
             } else {
                 throw e
             }
         }
-        val revision = workingTree.getRevision()
 
-        log.info { "Finished downloading source code revision '$revision' to '${outputDirectory.absolutePath}'." }
+        log.info {
+            "Finished downloading source code revision '${downloadedVcs.revision}' to '${outputDirectory.absolutePath}'."
+        }
 
-        val vcsInfo = VcsInfo(
-            type = applicableVcs.type,
-            url = pkg.vcsProcessed.url,
-            revision = pkg.vcsProcessed.revision.takeIf { it.isNotBlank() } ?: revision,
-            resolvedRevision = revision,
-            path = pkg.vcsProcessed.path
+        return DownloadResult(
+            dateTime = startTime,
+            downloadDirectory = outputDirectory,
+            vcsInfo = downloadedVcs,
+            originalVcsInfo = pkg.vcsProcessed.takeIf { it != downloadedVcs }
         )
-        return DownloadResult(startTime, outputDirectory, vcsInfo = vcsInfo,
-            originalVcsInfo = pkg.vcsProcessed.takeIf { it != vcsInfo })
     }
 
     private fun downloadSourceArtifact(pkg: Package, outputDirectory: File): DownloadResult {
