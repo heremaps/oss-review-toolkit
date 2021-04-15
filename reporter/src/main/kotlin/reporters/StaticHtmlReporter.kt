@@ -55,9 +55,11 @@ import org.ossreviewtoolkit.reporter.utils.ReportTableModel.ResolvableIssue
 import org.ossreviewtoolkit.reporter.utils.ReportTableModelMapper
 import org.ossreviewtoolkit.reporter.utils.SCOPE_EXCLUDE_LIST_COMPARATOR
 import org.ossreviewtoolkit.reporter.utils.containsUnresolved
+import org.ossreviewtoolkit.spdx.SpdxCompoundExpression
 import org.ossreviewtoolkit.spdx.SpdxConstants
 import org.ossreviewtoolkit.spdx.SpdxExpression
-import org.ossreviewtoolkit.spdx.SpdxLicense
+import org.ossreviewtoolkit.spdx.SpdxLicenseIdExpression
+import org.ossreviewtoolkit.spdx.SpdxLicenseWithExceptionExpression
 import org.ossreviewtoolkit.utils.Environment
 import org.ossreviewtoolkit.utils.ORT_FULL_NAME
 import org.ossreviewtoolkit.utils.isValidUri
@@ -519,20 +521,12 @@ class StaticHtmlReporter : Reporter {
             td {
                 row.concludedLicense?.let {
                     em { +"Concluded License:" }
-                    dl { dd { +"${row.concludedLicense}" } }
+                    dl { dd { div { licensesLink(row.concludedLicense) } } }
                 }
 
                 if (row.declaredLicenses.isNotEmpty()) {
                     em { +"Declared Licenses:" }
-                    dl {
-                        dd {
-                            row.declaredLicenses.forEach {
-                                div {
-                                    licenseLink(it.license.toString())
-                                }
-                            }
-                        }
-                    }
+                    dl { dd { row.declaredLicenses.forEach { div { licensesLink(it.license) } } } }
                 }
 
                 if (row.detectedLicenses.isNotEmpty()) {
@@ -558,7 +552,7 @@ class StaticHtmlReporter : Reporter {
 
                                 if (!license.isDetectedExcluded) {
                                     div {
-                                        licenseLink(license.license.toString())
+                                        licensesLink(license.license)
                                         if (permalink != null) {
                                             val count = license.locations.count { it.matchingPathExcludes.isEmpty() }
                                             permalink(permalink, count)
@@ -581,7 +575,7 @@ class StaticHtmlReporter : Reporter {
 
                 if (row.effectiveLicense != null) {
                     em { +"Effective License:" }
-                    dl { dd { +"${row.effectiveLicense}" } }
+                    dl { dd { div { licensesLink(row.effectiveLicense) } } }
                 }
             }
 
@@ -649,13 +643,34 @@ private fun DIV.licenseLink(license: String) {
     }
 }
 
+private fun DIV.licensesLink(expression: SpdxExpression) {
+    when (expression) {
+        is SpdxLicenseIdExpression -> {
+            licenseLink(expression.toString())
+        }
+        is SpdxLicenseWithExceptionExpression -> {
+            licenseLink(expression.simpleLicense())
+            +" WITH "
+            licenseLink(expression.exception)
+        }
+        is SpdxCompoundExpression -> {
+            licensesLink(expression.left)
+            +" ${expression.operator} "
+            licensesLink(expression.right)
+        }
+        else -> {
+            +expression.toString()
+        }
+    }
+}
+
 private fun getLicenseResourcePath(license: String): String =
     when {
         license.startsWith(SpdxConstants.LICENSE_REF_PREFIX) -> {
             "/licenserefs/$license"
         }
         license.contains("exception") -> {
-            "/exception/$license"
+            "/exceptions/$license"
         }
         else -> {
             "/licenses/$license"
