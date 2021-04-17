@@ -103,7 +103,7 @@ class ScanCode(
         }
     }
 
-    override val expectedVersion = "21.2.9"
+    override val expectedVersion = "21.6.7"
 
     override val configuration by lazy {
         mutableListOf<String>().apply {
