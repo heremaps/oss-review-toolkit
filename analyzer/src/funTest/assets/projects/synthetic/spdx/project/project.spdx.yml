@@ -68,6 +68,8 @@ packages:
   name: "zlib"
   versionInfo: "1.2.11"
   originator: "Person: Mark Adler, Jean-loup Gailly"
+  packageVerificationCode:
+    packageVerificationCodeValue: "fbea378234cae76e7ea10277350b36e1e0e931ab"
 relationships:
 - spdxElementId: "DocumentRef-curl-7.70.0:SPDXRef-ToolsElement"
   relatedSpdxElement: "SPDXRef-Package-xyz"
