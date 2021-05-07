@@ -34,6 +34,10 @@ import org.ossreviewtoolkit.utils.test.patchActualResult
 import org.ossreviewtoolkit.utils.test.patchExpectedResult
 
 class SbtFunTest : StringSpec({
+    "Getting the Sbt version works" {
+        Sbt.Factory().create()
+    }
+
     "Dependencies of the external 'directories' single project should be detected correctly".config(
         enabled = !Ci.isAzureWindows // Disabled as a prompt in Sbt 1.5.0 blocks execution when getting the version.
     ) {

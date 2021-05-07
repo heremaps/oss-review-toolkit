@@ -28,15 +28,13 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.Properties
 
-import kotlin.io.path.createTempDirectory
-
 import org.ossreviewtoolkit.analyzer.AbstractPackageManagerFactory
 import org.ossreviewtoolkit.analyzer.PackageManager
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.utils.CommandLineTool
-import org.ossreviewtoolkit.utils.ORT_NAME
 import org.ossreviewtoolkit.utils.Os
+import org.ossreviewtoolkit.utils.createOrtTempDir
 import org.ossreviewtoolkit.utils.getCommonFileParent
 import org.ossreviewtoolkit.utils.log
 import org.ossreviewtoolkit.utils.safeDeleteRecursively
@@ -53,7 +51,10 @@ class Sbt(
     repoConfig: RepositoryConfiguration
 ) : PackageManager(name, analysisRoot, analyzerConfig, repoConfig), CommandLineTool {
     companion object {
-        private val VERSION_REGEX = Regex("\\[info]\\s+(\\d+\\.\\d+\\.[^\\s]+)")
+        // See https://github.com/sbt/sbt/blob/v1.5.1/launcher-package/integration-test/src/test/scala/RunnerTest.scala#L9.
+        private const val SBT_VERSION_PATTERN = "\\d(\\.\\d+){2}(-\\w+)?"
+
+        private val VERSION_REGEX = Regex("(?:\\[info]\\s+)?($SBT_VERSION_PATTERN)")
         private val PROJECT_REGEX = Regex("\\[info] \t [ *] (.+)")
         private val POM_REGEX = Regex("\\[info] Wrote (.+\\.pom)")
 
@@ -95,14 +96,14 @@ class Sbt(
 
         // Avoid newer Sbt versions to warn about "Neither build.sbt nor a 'project' directory in the current directory"
         // and prompt the user to continue or quit on Windows where the "-batch" option is not supported.
-        val dummyProjectDir = createTempDirectory("$ORT_NAME-$managerName").toFile().apply {
-            resolve("build.sbt").createNewFile()
+        val dummyProjectDir = createOrtTempDir(managerName).apply {
+            resolve("project").mkdir()
         }
 
-        return super.getVersion(dummyProjectDir).also { dummyProjectDir.safeDeleteRecursively() }
+        return super.getVersion(dummyProjectDir).also { dummyProjectDir.safeDeleteRecursively(force = true) }
     }
 
-    override fun getVersionArguments() = "${SBT_OPTIONS.joinToString(" ")} sbtVersion"
+    override fun getVersionArguments() = "${SBT_OPTIONS.joinToString(" ")} sbtVersion --numeric-version"
 
     override fun transformVersion(output: String): String {
         val versions = output.lines().mapNotNull { line ->
