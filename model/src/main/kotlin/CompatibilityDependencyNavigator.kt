@@ -65,12 +65,13 @@ class CompatibilityDependencyNavigator internal constructor(
     override fun directDependencies(project: Project, scopeName: String): Sequence<DependencyNode> =
         project.invokeNavigator { directDependencies(it, scopeName) }
 
-    override fun scopeDependencies(
+    override fun dependenciesForScope(
         project: Project,
+        scopeName: String,
         maxDepth: Int,
         matcher: DependencyMatcher
-    ): Map<String, Set<Identifier>> =
-        project.invokeNavigator { scopeDependencies(it, maxDepth, matcher) }
+    ): Set<Identifier> =
+        project.invokeNavigator { dependenciesForScope(it, scopeName, maxDepth, matcher) }
 
     override fun packageDependencies(
         project: Project,

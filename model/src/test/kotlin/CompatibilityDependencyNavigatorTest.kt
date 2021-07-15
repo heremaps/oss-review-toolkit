@@ -130,37 +130,47 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
             }
         }
 
-        "scopeDependencies" should {
+        "dependenciesForScope" should {
             "return the dependencies of a dependency tree project" {
+                val scopeName = "testScope"
                 val maxDepth = 42
                 val matcher = mockk<DependencyMatcher>()
-                val scopeDependencies = mapOf(
-                    "scope1" to setOf(Identifier.EMPTY.copy(name = "id1")),
-                    "scope2" to setOf(Identifier.EMPTY.copy(name = "id2"))
-                )
+                val dependencies = setOf(Identifier.EMPTY.copy(name = "id1"), Identifier.EMPTY.copy(name = "id2"))
                 val treeNavigator = mockk<DependencyNavigator>()
                 val graphNavigator = mockk<DependencyNavigator>()
-                every { treeNavigator.scopeDependencies(treeProject, maxDepth, matcher) } returns scopeDependencies
+                every {
+                    treeNavigator.dependenciesForScope(
+                        treeProject,
+                        scopeName,
+                        maxDepth,
+                        matcher
+                    )
+                } returns dependencies
 
                 val navigator = CompatibilityDependencyNavigator(graphNavigator, treeNavigator)
 
-                navigator.scopeDependencies(treeProject, maxDepth, matcher) shouldBe scopeDependencies
+                navigator.dependenciesForScope(treeProject, scopeName, maxDepth, matcher) shouldBe dependencies
             }
 
             "return the dependencies of a dependency graph project" {
+                val scopeName = "testScope"
                 val maxDepth = 42
                 val matcher = mockk<DependencyMatcher>()
-                val scopeDependencies = mapOf(
-                    "scope1" to setOf(Identifier.EMPTY.copy(name = "id1")),
-                    "scope2" to setOf(Identifier.EMPTY.copy(name = "id2"))
-                )
-                val graphNavigator = mockk<DependencyNavigator>()
+                val dependencies = setOf(Identifier.EMPTY.copy(name = "id1"), Identifier.EMPTY.copy(name = "id2"))
                 val treeNavigator = mockk<DependencyNavigator>()
-                every { graphNavigator.scopeDependencies(graphProject, maxDepth, matcher) } returns scopeDependencies
+                val graphNavigator = mockk<DependencyNavigator>()
+                every {
+                    graphNavigator.dependenciesForScope(
+                        graphProject,
+                        scopeName,
+                        maxDepth,
+                        matcher
+                    )
+                } returns dependencies
 
                 val navigator = CompatibilityDependencyNavigator(graphNavigator, treeNavigator)
 
-                navigator.scopeDependencies(graphProject, maxDepth, matcher) shouldBe scopeDependencies
+                navigator.dependenciesForScope(graphProject, scopeName, maxDepth, matcher) shouldBe dependencies
             }
         }
 
