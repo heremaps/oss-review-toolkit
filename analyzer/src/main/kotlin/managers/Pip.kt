@@ -170,6 +170,8 @@ class Pip(
     }
 
     companion object {
+        private const val SHORT_STRING_MAX_CHARS = 200
+
         private val INSTALL_OPTIONS = arrayOf(
             "--no-warn-conflicts",
             "--prefer-binary"
@@ -436,13 +438,15 @@ class Pip(
         return declaredLicenses
     }
 
-    private fun getLicenseFromLicenseField(value: String?): String? =
-        value?.let {
-            // Work-around for projects that declare licenses in classifier-style syntax.
-            getLicenseFromClassifier(it) ?: it
-        }?.takeUnless {
-            it.isBlank() || it == "UNKNOWN"
-        }
+    private fun getLicenseFromLicenseField(value: String?): String? {
+        if (value.isNullOrBlank() || value == "UNKNOWN") return null
+
+        val isShortString = value.length <= SHORT_STRING_MAX_CHARS && "\n" !in value
+        if (!isShortString) return null
+
+        // Apply a work-around for projects that declare licenses in classifier-syntax in the license field.
+        return getLicenseFromClassifier(value) ?: value
+    }
 
     private fun getLicenseFromClassifier(classifier: String): String? =
         // Example license classifier:
@@ -643,8 +647,10 @@ class Pip(
 
         val rootNode = jsonMapper.readTree(json) as ArrayNode
 
-        return rootNode.elements().asSequence().mapTo(mutableSetOf()) {
-            Identifier("PyPI", "", it["name"].textValue(), it["version"].textValue())
+        return rootNode.elements().asSequence().mapNotNullTo(mutableSetOf()) {
+            val name = it["name"].textValue()
+            val version = it["version"].textValue()
+            Identifier("PyPI", "", name, version).takeUnless { isPhonyDependency(name, version) }
         }
     }
 
@@ -677,7 +683,7 @@ class Pip(
         }
 
         val declaredLicenses = sortedSetOf<String>()
-        getLicenseFromLicenseField(map["License"]?.single())?.let { declaredLicenses += it }
+        map["License"]?.mapNotNullTo(declaredLicenses) { getLicenseFromLicenseField(it) }
         map["Classifiers"]?.mapNotNullTo(declaredLicenses) { getLicenseFromClassifier(it) }
 
         val authors = parseAuthorString(map["Author"]?.singleOrNull())
