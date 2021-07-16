@@ -18,15 +18,27 @@
  * License-Filename: LICENSE
  */
 
+@file:OptIn(kotlin.io.path.ExperimentalPathApi::class)
+
 import com.github.benmanes.gradle.versions.updates.DependencyUpdatesTask
 
 import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.report.ReportMergeTask
 
 import java.net.URL
+import java.nio.file.FileSystems
+import java.nio.file.Paths
+
+import kotlin.io.path.reader
+
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.treewalk.TreeWalk
 
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
+import org.gradle.kotlin.dsl.support.normaliseLineSeparators
 
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
@@ -58,7 +70,7 @@ buildscript {
 }
 
 if (version == Project.DEFAULT_VERSION) {
-    version = org.eclipse.jgit.api.Git.open(rootDir).use { git ->
+    version = Git.open(rootDir).use { git ->
         // Make the output exactly match "git describe --abbrev=7 --always --tags --dirty", which is what is used in
         // "scripts/docker_build.sh".
         val description = git.describe().setAlways(true).setTags(true).call()
@@ -393,6 +405,100 @@ tasks.register("allDependencies").configure {
     dependenciesTasks.zipWithNext().forEach { (a, b) ->
         b.configure {
             mustRunAfter(a)
+        }
+    }
+}
+
+tasks.register("checkLicenseHeader").configure {
+    description = "Checks for license headers in source code files."
+    group = "Verification"
+
+    val licenseHeaderPatternFilename = ".license-header-pattern"
+
+    val pathExcludes = listOf(
+        "**/funTest/assets/**",
+        "**/resources/META-INF/**",
+        "**/test/assets/**",
+        "*.json", // JSON does not support comments at all.
+        "*.md",
+        "*.xml", // XML does not support comments before the <xml> tag.
+        ".*",
+        ".idea/**",
+        "LICENSE",
+        "LICENSES/**",
+        "examples/**",
+        "gradle*",
+        "gradle/**",
+        "logos/*.png",
+        "reporter-web-app/src/logo.svg",
+        "reporter-web-app/yarn.lock",
+        "reporter/src/main/resources/prismjs/**",
+        "spdx-utils/src/main/resources/exceptions/**",
+        "spdx-utils/src/main/resources/licenserefs/**",
+        "spdx-utils/src/main/resources/licenses/**",
+        "spdx-utils/src/test/resources/spdx-spec-examples/**"
+    ).map {
+        FileSystems.getDefault().getPathMatcher("glob:**/$it")
+    }
+
+    val filesToCheck = mutableListOf<java.nio.file.Path>()
+
+    Git.open(rootDir).use { git ->
+        val head = git.repository.exactRef(Constants.HEAD)
+
+        val commit = RevWalk(git.repository).use { walk ->
+            walk.parseCommit(head.objectId)
+        }
+
+        TreeWalk(git.repository).use { walk ->
+            walk.addTree(commit.tree)
+
+            while (walk.next()) {
+                val path = Paths.get(rootDir.path, walk.pathString)
+
+                if (pathExcludes.any { it.matches(path) }) {
+                    logger.info("Will skip '$path' in the license header check as it matches an exclude.")
+                    continue
+                }
+
+                if (walk.isSubtree) {
+                    walk.enterSubtree()
+                } else {
+                    logger.info("Configuring '$path' to be included in the license header check.")
+
+                    // For some reason the "+=" operator cannot be used here.
+                    filesToCheck.add(path)
+                }
+            }
+        }
+    }
+
+    inputs.file(licenseHeaderPatternFilename)
+    inputs.files(filesToCheck)
+
+    doLast {
+        val pattern = file(licenseHeaderPatternFilename).readText().normaliseLineSeparators()
+        val patternRegex = Regex(pattern)
+
+        // Limit the number of characters to read for performance reasons.
+        val maxHeaderChars = 2500
+        val buffer = CharArray(maxHeaderChars)
+
+        val (filesWithHeader, filesWithoutHeader) = filesToCheck.partition { path ->
+            val header = path.reader().use {
+                it.read(buffer, 0, buffer.size)
+                String(buffer).normaliseLineSeparators()
+            }
+
+            patternRegex.containsMatchIn(header)
+        }
+
+        logger.info("${filesWithHeader.size} files do contain the license header.")
+
+        if (filesWithoutHeader.isNotEmpty()) {
+            val count = filesWithoutHeader.size
+            val list = filesWithoutHeader.joinToString("\n")
+            throw GradleException("Please add the license header to the following $count files:\n$list")
         }
     }
 }
