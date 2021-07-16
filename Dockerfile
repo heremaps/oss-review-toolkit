@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.2
 
 # Copyright (C) 2020 Bosch Software Innovations GmbH
+# Copyright (C) 2021 Alliander N.V
 # Copyright (C) 2021 Helio Chissini de Castro <helio@kde.org>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,41 +71,49 @@ RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/
 
 WORKDIR /work
 
-# Copy the necessary bash resource to switch pythons
-# Same mechanism can be used for other languages as long
-# We treat in a non distribution native
+# Copy the necessary bash resource to have paths
+# for different languages
 COPY docker/root-bashrc /root/.bashrc
 RUN mkdir -p /root/.bash_includes
 
 #------------------------------------------------------------------------
-# Multiple Python versions
-ENV CONAN_VERSION=1.18.0 
-ENV SCANCODE_VERSION=21.3.31
-COPY docker/multi_python_build.sh /work       
-RUN chmod +x multi_python_build.sh
-
-# Python versions
-# To call specificx python version, add -e PYTHON_VERSION=3.x ( no patch level )
-# i.e docker run -e PYTHON_VERSION=3.9
-# If no version is declared, 3.6 will be the default
-# The script will install all python Ort dependencies required: 
-# scancode-toolkit, mercurial, conan, pipenv and virtualenv
-RUN ./multi_python_build.sh 3.6.13
-RUN ./multi_python_build.sh 3.7.10
-RUN ./multi_python_build.sh 3.8.9
-RUN ./multi_python_build.sh 3.9.4
+# Python
+# Using pyenv and make 3.8 default
+ENV CONAN_VERSION=1.38.0
+ENV SCANCODE_VERSION=21.6.7
+# Python pyenv
+ENV PYENV_ROOT=/opt/python
+RUN curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash
+ENV PATH=/opt/python/bin:$PATH
+RUN pyenv install 3.8.11
+RUN pyenv global 3.8.11
+ENV PATH=/opt/python/shims:$PATH
+RUN pip install -U pip
+RUN pip install conan=="${CONAN_VERSION}" \
+    Mercurial \
+    scancode-toolkit[full]=="${SCANCODE_VERSION}" \
+    virtualenv
 COPY docker/python.sh /root/.bash_includes
+
+#------------------------------------------------------------------------
+# Nodejs
+# Using nvm
+ENV NVM_DIR=/opt/nodejs
+RUN git clone https://github.com/nvm-sh/nvm.git /opt/nodejs
+RUN . $NVM_DIR/nvm.sh && nvm install --lts
+COPY docker/nodejs.sh /root/.bash_includes
 
 #------------------------------------------------------------------------
 # Golang
 # Golang dep depends on some development packages to be installed, so need build
 # in the build stage
 ENV GO_DEP_VERSION=0.5.4
-ENV GO_VERSION=1.16.3
+ENV GO_VERSION=1.16.6
 ENV GOPATH=/opt/go
-RUN wget -qO- https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /opt -xz \
-    && export PATH=/opt/go/bin:$PATH \
-    && curl -ksS https://raw.githubusercontent.com/golang/dep/v$GO_DEP_VERSION/install.sh | bash
+RUN wget -qO- https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /opt -xz
+ENV PATH=/opt/go/bin:$PATH
+RUN go version
+RUN curl -ksS https://raw.githubusercontent.com/golang/dep/v$GO_DEP_VERSION/install.sh | bash
 RUN echo "add_local_path /opt/go/bin:$PATH" > /root/.bash_includes/go.sh
 
 #------------------------------------------------------------------------
@@ -118,7 +127,6 @@ COPY . /usr/local/src/ort
 
 WORKDIR /usr/local/src/ort
 
-
 # This can be set to a directory containing CRT-files for custom certificates that ORT and all build tools should know about.
 ARG CRT_FILES=""
 COPY "$CRT_FILES" /tmp/certificates/
@@ -131,9 +139,10 @@ RUN --mount=type=cache,target=/root/.gradle/ \
         /opt/ort/bin/import_certificates.sh /tmp/certificates/; \
        fi \
     && scripts/set_gradle_proxy.sh \
+    && . $NVM_DIR/nvm.sh \
     && sed -i -r 's,(^distributionUrl=)(.+)-all\.zip$,\1\2-bin.zip,' gradle/wrapper/gradle-wrapper.properties \
     && ./gradlew --no-daemon --stacktrace -Pversion=$ORT_VERSION :cli:distTar :helper-cli:startScripts
-RUN echo "add_local_path /opt/ort/bin" > /root/.bash_includes/ort.sh 
+RUN echo "add_local_path /opt/ort/bin" > /root/.bash_includes/ort.sh
 
 #------------------------------------------------------------------------
 # Remove the work directory
@@ -151,14 +160,9 @@ RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/
 
 #------------------------------------------------------------------------
 # External repositories for SBT
-ENV SBT_VERSION=1.3.8
-RUN echo "deb https://dl.bintray.com/sbt/debian /" | tee -a /etc/apt/sources.list.d/sbt.list \
-    && curl -ksS "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | apt-key adv --import -
-
-# Exgternal repository for NodeJS
-RUN curl -ksS "https://deb.nodesource.com/gpgkey/nodesource.gpg.key" | apt-key adv --import - \
-    && echo 'deb https://deb.nodesource.com/node_15.x focal main' | tee -a /etc/apt/sources.list.d/nodesource.list \
-    && echo 'deb-src https://deb.nodesource.com/node_15.x focal main' >> /etc/apt/sources.list.d/nodesource.list
+RUN echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | tee /etc/apt/sources.list.d/sbt.list
+RUN echo "deb https://repo.scala-sbt.org/scalasbt/debian /" | tee /etc/apt/sources.list.d/sbt_old.list
+RUN curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | apt-key add
 
 #------------------------------------------------------------------------
 # Minimal set of packages for main docker
@@ -182,10 +186,9 @@ RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/
         libxrender1 \
         libxtst6 \
         netbase \
-        nodejs \
         openjdk-11-jre \
         openssh-client \
-        sbt=$SBT_VERSION \
+        sbt \
         subversion \
         unzip \
         xz-utils \
@@ -199,8 +202,13 @@ COPY --from=build /root/.bash_includes/* /root/.bash_includes/
 
 #------------------------------------------------------------------------
 # Python from build
-COPY --from=build /opt/python /opt/python/
-COPY --from=build /var/lib/dpkg/alternatives/python /var/lib/dpkg/alternatives/
+ENV PYENV_ROOT=/opt/python
+COPY --from=build /opt/python /opt/python
+
+#------------------------------------------------------------------------
+# nodejs from build
+ENV NVM_DIR=/opt/nodejs
+COPY --from=build /opt/nodejs /opt/nodejs
 
 #------------------------------------------------------------------------
 # Golang from build
@@ -224,11 +232,11 @@ RUN curl -Os https://dl.google.com/android/repository/commandlinetools-linux-${A
     && yes | $ANDROID_HOME/cmdline-tools/bin/sdkmanager $SDK_MANAGER_PROXY_OPTIONS --sdk_root=$ANDROID_HOME "platform-tools"
 
 #------------------------------------------------------------------------
-# NPM based package managers  
+# NPM based package managers
 ENV BOWER_VERSION=1.8.8
-ENV NPM_VERSION=6.14.2 
+ENV NPM_VERSION=6.14.2
 ENV YARN_VERSION=1.22.4
-RUN npm install --global npm@$NPM_VERSION bower@$BOWER_VERSION yarn@$YARN_VERSION
+RUN . $NVM_DIR/nvm.sh && npm install --global npm@$NPM_VERSION bower@$BOWER_VERSION yarn@$YARN_VERSION
 
 #------------------------------------------------------------------------
 # ORT

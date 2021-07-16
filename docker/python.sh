@@ -17,15 +17,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # License-Filename: LICENSE
 
-# Define the pythonversion
-PYTHON_VERSION=${PYTHON_VERSION:-3.6}
+PYENV_ROOT="/opt/python"
+export PYENVROOT
 
-# Set alternatives for the correct version
-# slave chain add both python, python3, pip and pip3 on main /usr/bin
-update-alternatives --set python "/opt/python/${PYTHON_VERSION}/bin/python${PYTHON_VERSION}"
+add_local_path "${PYENV_ROOT}/bin"
 
-# We use python shared, so need to set LD_LIBRTARY_PATH
-LD_LIBRARY_PATH="/opt/python/${PYTHON_VERSION}/lib"
-export LD_LIBRARY_PATH
-
-add_local_path "/opt/python/${PYTHON_VERSION}/bin"
+eval "$(pyenv init --path)";
+. "$(pyenv root)"/completions/pyenv.bash;
